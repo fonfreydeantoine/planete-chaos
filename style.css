@@ -1,0 +1,170 @@
+/* ============================================================
+   PLANÈTE CHAOS — style.css
+   Esthétique : cosmos organique, typographie contrastée
+   ============================================================ */
+
+:root {
+  --bg: #000008;
+  --ui-color: rgba(255, 255, 255, 0.45);
+  --ui-accent: rgba(180, 220, 255, 0.8);
+  --fiche-bg: rgba(4, 8, 24, 0.88);
+  --fiche-border: rgba(120, 180, 255, 0.25);
+  --font-display: 'Cormorant Garamond', Georgia, serif;
+  --font-mono: 'Share Tech Mono', monospace;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  cursor: crosshair;
+}
+
+/* ---- Canvas ---- */
+#world {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+}
+
+/* ---- UI overlay ---- */
+#ui {
+  position: fixed;
+  bottom: 28px;
+  left: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+#ui-title {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 300;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.75);
+  letter-spacing: 0.06em;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+#ui-birthdate,
+#ui-age,
+#ui-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ui-color);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+#ui-count {
+  color: var(--ui-accent);
+  margin-top: 2px;
+}
+
+/* ---- Fiche créature ---- */
+#fiche {
+  position: fixed;
+  z-index: 20;
+  background: var(--fiche-bg);
+  border: 1px solid var(--fiche-border);
+  border-radius: 12px;
+  padding: 18px 20px 16px;
+  min-width: 200px;
+  max-width: 240px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow:
+    0 0 40px rgba(80, 140, 255, 0.12),
+    0 8px 32px rgba(0, 0, 0, 0.6);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: all;
+}
+
+#fiche.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.94);
+}
+
+#fiche-close {
+  position: absolute;
+  top: 10px;
+  right: 13px;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+#fiche-close:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+#fiche-content {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: rgba(200, 220, 255, 0.75);
+  line-height: 1.9;
+  letter-spacing: 0.04em;
+}
+
+#fiche-content .fiche-name {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 300;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.9);
+  letter-spacing: 0.06em;
+  margin-bottom: 10px;
+  display: block;
+}
+
+#fiche-content .fiche-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 7px;
+  vertical-align: middle;
+  box-shadow: 0 0 8px currentColor;
+}
+
+#fiche-content .fiche-label {
+  color: rgba(150, 180, 255, 0.55);
+  margin-right: 4px;
+}
+
+#fiche-content .fiche-row {
+  display: flex;
+  justify-content: space-between;
+}
+
+#fiche-content .fiche-traits {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(120, 180, 255, 0.12);
+  color: rgba(180, 210, 255, 0.5);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* ---- Curseur interactif sur les créatures ---- */
+body.hovering {
+  cursor: pointer;
+}
