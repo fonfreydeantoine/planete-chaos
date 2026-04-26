@@ -391,7 +391,10 @@ function updateUI() {
   // Compteur par espèce
   const speciesEl = document.getElementById("ui-species");
   if (speciesEl && Object.keys(speciesCounts).length > 0) {
-    const entries = Object.entries(speciesCounts).sort((a, b) => b[1] - a[1]);
+    const entries = Object.entries(speciesCounts)
+      .filter(([sp, n]) => n >= 4)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8);
     speciesEl.textContent = entries.map(([sp, n]) => `${sp} ${n}`).join("  ·  ");
   }
 }
