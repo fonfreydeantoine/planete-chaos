@@ -1,13 +1,8 @@
 /* ============================================================
-   PLANÈTE CHAOS — app.js (client Netlify)
-   Se connecte au serveur Railway via WebSocket
-   Reçoit l'état du monde et l'anime localement
+   PLANÈTE CHAOS — app.js v2 (client Netlify)
+   Espèces, hybrides, prédation, affinités
    ============================================================ */
 
-// ============================================================
-// ADRESSE DU SERVEUR RAILWAY
-// À mettre à jour après déploiement Railway
-// ============================================================
 const SERVER_URL = "wss://planete-chaos-server-production.up.railway.app";
 
 // ============================================================
@@ -16,17 +11,11 @@ const SERVER_URL = "wss://planete-chaos-server-production.up.railway.app";
 const canvas = document.getElementById("world");
 const ctx = canvas.getContext("2d");
 
-function resize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
+function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
 resize();
 window.addEventListener("resize", resize);
 
-// Dimensions de référence du serveur
-const SERVER_W = 1280;
-const SERVER_H = 800;
-
+const SERVER_W = 1280, SERVER_H = 800;
 function scaleX(x) { return x / SERVER_W * canvas.width; }
 function scaleY(y) { return y / SERVER_H * canvas.height; }
 function scaleR(r) { return r / SERVER_W * canvas.width; }
@@ -35,7 +24,6 @@ function scaleR(r) { return r / SERVER_W * canvas.width; }
 // UTILITAIRES
 // ============================================================
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
-
 function lerpAngle(a, b, t) {
   const diff = ((b - a + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
   return a + diff * t;
@@ -44,78 +32,73 @@ function lerpAngle(a, b, t) {
 // ============================================================
 // ÉTAT LOCAL
 // ============================================================
-let serverCreatures = new Map();
 let localCreatures = new Map();
 let worldBirth = null;
 let renderTick = 0;
-let connected = false;
+let speciesCounts = {};
+
+// Implosions en cours (animations de mort par prédation)
+let implosions = [];
 
 // ============================================================
-// CONNEXION WEBSOCKET
+// WEBSOCKET
 // ============================================================
 let ws = null;
 let reconnectDelay = 2000;
 
 function connect() {
   ws = new WebSocket(SERVER_URL);
-
-  ws.addEventListener("open", () => {
-    connected = true;
-    reconnectDelay = 2000;
-    console.log("Connecté au serveur Planète Chaos");
-    hideOverlay();
-  });
-
-  ws.addEventListener("message", (event) => {
+  ws.addEventListener("open", () => { reconnectDelay = 2000; hideOverlay(); });
+  ws.addEventListener("message", e => {
     try {
-      const msg = JSON.parse(event.data);
+      const msg = JSON.parse(e.data);
       if (msg.type === "snapshot") handleSnapshot(msg.data);
-    } catch (e) {
-      console.error("Erreur parsing :", e);
-    }
+    } catch (err) { console.error(err); }
   });
-
   ws.addEventListener("close", () => {
-    connected = false;
     showOverlay("connexion perdue — reconnexion en cours…");
     setTimeout(connect, reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 1.5, 15000);
   });
-
   ws.addEventListener("error", () => {});
 }
 
 // ============================================================
-// TRAITEMENT SNAPSHOT
+// SNAPSHOT
 // ============================================================
 function handleSnapshot(data) {
   if (worldBirth === null) worldBirth = data.worldBirth;
+  speciesCounts = data.speciesCounts ?? {};
 
   const incomingIds = new Set();
 
   data.creatures.forEach(c => {
     incomingIds.add(c.id);
-    serverCreatures.set(c.id, c);
-
     if (!localCreatures.has(c.id)) {
       localCreatures.set(c.id, {
-        ...c,
-        lx: c.x, ly: c.y, la: c.angle,
+        ...c, lx: c.x, ly: c.y, la: c.angle,
         deathGlow: c.dead ? 1.0 : null,
+        implosionPhase: c.deathCause === "predation" ? 1.0 : null,
         limbOffset: Math.random() * Math.PI * 2,
       });
     } else {
       const local = localCreatures.get(c.id);
+      // Détecter mort par prédation pour déclencher l'animation
+      if (c.dead && !local.dead && c.deathCause === "predation") {
+        implosions.push({
+          x: local.lx, y: local.ly,
+          hue: c.predatorHue ?? 0,
+          size: scaleR(c.genes.size),
+          phase: 1.0,
+        });
+      }
       Object.assign(local, c);
       if (c.dead && local.deathGlow === null) local.deathGlow = 1.0;
     }
   });
 
   for (const id of localCreatures.keys()) {
-    if (!incomingIds.has(id)) {
-      localCreatures.delete(id);
-      serverCreatures.delete(id);
-    }
+    if (!incomingIds.has(id)) { localCreatures.delete(id); }
   }
 }
 
@@ -124,15 +107,18 @@ function handleSnapshot(data) {
 // ============================================================
 function drawCreature(c, tick) {
   const g = c.genes;
-  const cx = scaleX(c.lx);
-  const cy = scaleY(c.ly);
+  const cx = scaleX(c.lx), cy = scaleY(c.ly);
   const size = scaleR(g.size);
-  const alpha = c.dead ? Math.max(0, c.deathGlow ?? 0) : 1;
+  const isDead = c.dead;
+  const isPredation = isDead && c.deathCause === "predation";
+
+  // Les morts par prédation sont gérés par l'implosion séparée
+  if (isPredation) return;
+
+  const alpha = isDead ? Math.max(0, c.deathGlow ?? 0) : 1;
   if (alpha <= 0) return;
 
-  const hue = g.hue;
-  const sat = 70 + g.saturation * 20;
-  const lit = 55 + g.lightness * 15;
+  const hue = g.hue, sat = 70 + g.saturation * 20, lit = 55 + g.lightness * 15;
   const t = (tick + (c.limbOffset ?? 0)) * 0.04;
 
   ctx.save();
@@ -140,20 +126,17 @@ function drawCreature(c, tick) {
   ctx.translate(cx, cy);
 
   // Appendices
-  const limbCount = g.limbCount;
   const phases = c.limbPhases ?? [];
-  for (let i = 0; i < limbCount; i++) {
-    const phase = phases[i] ?? (i / limbCount) * Math.PI * 2;
-    const baseAngle = c.la + (i / limbCount) * Math.PI * 2;
+  for (let i = 0; i < g.limbCount; i++) {
+    const phase = phases[i] ?? (i / g.limbCount) * Math.PI * 2;
+    const baseAngle = c.la + (i / g.limbCount) * Math.PI * 2;
     const wave = Math.sin(t * g.limbSpeed + phase) * 0.6;
     const limbAngle = baseAngle + wave;
     const limbLen = scaleR(g.limbLength);
     const limbW = Math.max(1, scaleR(g.size * 0.28));
 
-    const x1 = Math.cos(limbAngle) * size * 0.8;
-    const y1 = Math.sin(limbAngle) * size * 0.8;
-    const x2 = Math.cos(limbAngle) * (size * 0.8 + limbLen);
-    const y2 = Math.sin(limbAngle) * (size * 0.8 + limbLen);
+    const x1 = Math.cos(limbAngle) * size * 0.8, y1 = Math.sin(limbAngle) * size * 0.8;
+    const x2 = Math.cos(limbAngle) * (size * 0.8 + limbLen), y2 = Math.sin(limbAngle) * (size * 0.8 + limbLen);
     const midX = (x1 + x2) / 2 + Math.cos(limbAngle + Math.PI / 2) * limbLen * 0.35 * Math.sin(t * g.limbSpeed + phase + 1);
     const midY = (y1 + y2) / 2 + Math.sin(limbAngle + Math.PI / 2) * limbLen * 0.35 * Math.sin(t * g.limbSpeed + phase + 1);
 
@@ -171,7 +154,18 @@ function drawCreature(c, tick) {
     ctx.fill();
   }
 
-  // Halo
+  // Halo prédateur
+  if (g.isPredator && !isDead) {
+    const predGlow = ctx.createRadialGradient(0, 0, size * 0.8, 0, 0, size * 3);
+    predGlow.addColorStop(0, `hsla(${hue}, 100%, 50%, 0.08)`);
+    predGlow.addColorStop(1, `hsla(${hue}, 100%, 40%, 0)`);
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 3, 0, Math.PI * 2);
+    ctx.fillStyle = predGlow;
+    ctx.fill();
+  }
+
+  // Halo standard
   const glow = ctx.createRadialGradient(0, 0, size * 0.5, 0, 0, size * 2.2);
   glow.addColorStop(0, `hsla(${hue}, ${sat}%, ${lit + 20}%, ${0.15 * alpha})`);
   glow.addColorStop(1, `hsla(${hue}, ${sat}%, ${lit}%, 0)`);
@@ -191,38 +185,30 @@ function drawCreature(c, tick) {
   ctx.fill();
 
   // Yeux
-  if (!c.dead) {
-    const eyeDist = size * 0.42;
-    const eyeR = Math.max(1, size * 0.18);
-    const ex = Math.cos(c.la) * eyeDist * 0.7;
-    const ey = Math.sin(c.la) * eyeDist * 0.7;
-    const perpX = -Math.sin(c.la) * eyeDist * 0.38;
-    const perpY = Math.cos(c.la) * eyeDist * 0.38;
-
+  if (!isDead) {
+    const eyeDist = size * 0.42, eyeR = Math.max(1, size * 0.18);
+    const ex = Math.cos(c.la) * eyeDist * 0.7, ey = Math.sin(c.la) * eyeDist * 0.7;
+    const perpX = -Math.sin(c.la) * eyeDist * 0.38, perpY = Math.cos(c.la) * eyeDist * 0.38;
     [1, -1].forEach(side => {
       ctx.beginPath();
       ctx.arc(ex + perpX * side, ey + perpY * side, eyeR, 0, Math.PI * 2);
       ctx.fillStyle = "rgba(255,255,255,0.92)";
       ctx.fill();
       ctx.beginPath();
-      ctx.arc(
-        ex + perpX * side + Math.cos(c.la) * eyeR * 0.3,
-        ey + perpY * side + Math.sin(c.la) * eyeR * 0.3,
-        eyeR * 0.5, 0, Math.PI * 2
-      );
+      ctx.arc(ex + perpX * side + Math.cos(c.la) * eyeR * 0.3, ey + perpY * side + Math.sin(c.la) * eyeR * 0.3, eyeR * 0.5, 0, Math.PI * 2);
       ctx.fillStyle = `hsla(${hue}, 80%, 15%, 0.9)`;
       ctx.fill();
     });
   }
 
-  // Lueur de mort
-  if (c.dead && (c.deathGlow ?? 0) > 0) {
-    const deathGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 3.5);
-    deathGrad.addColorStop(0, `hsla(${hue}, 100%, 90%, ${c.deathGlow * 0.7})`);
-    deathGrad.addColorStop(1, `hsla(${hue}, 100%, 60%, 0)`);
+  // Lueur de mort naturelle
+  if (isDead && !isPredation && (c.deathGlow ?? 0) > 0) {
+    const dg = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 3.5);
+    dg.addColorStop(0, `hsla(${hue}, 100%, 90%, ${c.deathGlow * 0.7})`);
+    dg.addColorStop(1, `hsla(${hue}, 100%, 60%, 0)`);
     ctx.beginPath();
     ctx.arc(0, 0, size * 3.5, 0, Math.PI * 2);
-    ctx.fillStyle = deathGrad;
+    ctx.fillStyle = dg;
     ctx.fill();
   }
 
@@ -230,7 +216,43 @@ function drawCreature(c, tick) {
 }
 
 // ============================================================
-// INTERPOLATION LOCALE
+// IMPLOSIONS (mort par prédation)
+// ============================================================
+function updateAndDrawImplosions() {
+  implosions = implosions.filter(imp => imp.phase > 0);
+  implosions.forEach(imp => {
+    imp.phase -= 0.04;
+    const p = imp.phase;
+    const cx = scaleX(imp.x), cy = scaleY(imp.y);
+    const currentSize = imp.size * (1 - (1 - p) * 0.85);
+    const alpha = p;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(cx, cy);
+
+    // Contraction lumineuse
+    const blast = ctx.createRadialGradient(0, 0, 0, 0, 0, currentSize * 4);
+    blast.addColorStop(0, `hsla(${imp.hue}, 100%, 95%, ${alpha * 0.9})`);
+    blast.addColorStop(0.3, `hsla(${imp.hue}, 100%, 70%, ${alpha * 0.6})`);
+    blast.addColorStop(1, `hsla(${imp.hue}, 100%, 50%, 0)`);
+    ctx.beginPath();
+    ctx.arc(0, 0, currentSize * 4, 0, Math.PI * 2);
+    ctx.fillStyle = blast;
+    ctx.fill();
+
+    // Noyau brillant
+    ctx.beginPath();
+    ctx.arc(0, 0, currentSize, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(${imp.hue}, 80%, 90%, ${alpha})`;
+    ctx.fill();
+
+    ctx.restore();
+  });
+}
+
+// ============================================================
+// INTERPOLATION
 // ============================================================
 function updateLocalCreatures() {
   localCreatures.forEach(c => {
@@ -253,31 +275,44 @@ const ficheContent = document.getElementById("fiche-content");
 const ficheClose = document.getElementById("fiche-close");
 let selectedId = null;
 
-ficheClose.addEventListener("click", () => {
-  ficheEl.classList.add("hidden");
-  selectedId = null;
-});
+ficheClose.addEventListener("click", () => { ficheEl.classList.add("hidden"); selectedId = null; });
+
+function getTraits(genes) {
+  const t = [];
+  if (genes.isPredator) t.push("prédatrice");
+  if (genes.speed > 1.2) t.push("rapide"); else if (genes.speed < 0.4) t.push("lente");
+  if (genes.size > 8) t.push("massive"); else if (genes.size < 2.5) t.push("minuscule");
+  if (genes.metabolism < 0.6) t.push("économe"); else if (genes.metabolism > 1.5) t.push("vorace");
+  if (genes.fertility > 1.6) t.push("prolifique");
+  if ((genes.hybridDepth ?? 0) > 0) t.push(`hybride gen.${genes.hybridDepth}`);
+  if (t.length === 0) t.push("équilibrée");
+  return t;
+}
 
 function showFiche(c, mx, my) {
   selectedId = c.id;
-  const hue = c.genes.hue;
-  const traits = getTraits(c.genes);
+  const g = c.genes;
+  const hue = g.hue;
+  const parentInfo = (g.parentSpecies?.length > 1)
+    ? `<div class="fiche-row"><span class="fiche-label">parents</span><span>${g.parentSpecies.join(" × ")}</span></div>`
+    : "";
 
   ficheContent.innerHTML = `
     <span class="fiche-name">
       <span class="fiche-dot" style="background:hsl(${hue},70%,60%);color:hsl(${hue},70%,60%)"></span>
-      Créature n°${c.id}
+      ${g.speciesName}
     </span>
+    <div class="fiche-row"><span class="fiche-label">créature</span><span>n°${c.id}</span></div>
+    ${parentInfo}
     <div class="fiche-row"><span class="fiche-label">âge</span><span id="f-age">${Math.floor(c.age / 60)} cycles</span></div>
     <div class="fiche-row"><span class="fiche-label">génération</span><span>${c.generation}</span></div>
     <div class="fiche-row"><span class="fiche-label">descendants</span><span id="f-desc">${c.descendants}</span></div>
-    <div class="fiche-row"><span class="fiche-label">énergie</span><span id="f-energy">${Math.round(c.energy)} / ${Math.round(c.genes.baseEnergy)}</span></div>
-    <div class="fiche-traits">${traits.join(", ")}</div>
+    <div class="fiche-row"><span class="fiche-label">énergie</span><span id="f-energy">${Math.round(c.energy)} / ${Math.round(g.baseEnergy)}</span></div>
+    <div class="fiche-traits">${getTraits(g).join(", ")}</div>
   `;
 
-  const fw = 240, fh = 185;
-  let fx = mx + 18;
-  let fy = my - fh / 2;
+  const fw = 250, fh = 210;
+  let fx = mx + 18, fy = my - fh / 2;
   if (fx + fw > window.innerWidth - 10) fx = mx - fw - 18;
   if (fy < 10) fy = 10;
   if (fy + fh > window.innerHeight - 10) fy = window.innerHeight - fh - 10;
@@ -298,26 +333,11 @@ function updateFiche() {
   if (e) e.textContent = Math.round(c.energy) + " / " + Math.round(c.genes.baseEnergy);
 }
 
-function getTraits(genes) {
-  const traits = [];
-  if (genes.speed > 1.2) traits.push("rapide");
-  else if (genes.speed < 0.5) traits.push("lente");
-  if (genes.size > 7) traits.push("massive");
-  else if (genes.size < 3) traits.push("minuscule");
-  if (genes.metabolism < 0.7) traits.push("économe");
-  else if (genes.metabolism > 1.4) traits.push("vorace");
-  if (genes.fertility > 1.4) traits.push("prolifique");
-  if (traits.length === 0) traits.push("équilibrée");
-  return traits;
-}
-
 // ============================================================
 // INTERACTION SOURIS
 // ============================================================
 function hitTest(c, mx, my) {
-  const cx = scaleX(c.lx), cy = scaleY(c.ly);
-  const r = scaleR(c.genes.size) + 8;
-  return Math.hypot(mx - cx, my - cy) < r;
+  return Math.hypot(mx - scaleX(c.lx), my - scaleY(c.ly)) < scaleR(c.genes.size) + 8;
 }
 
 canvas.addEventListener("mousemove", e => {
@@ -327,20 +347,16 @@ canvas.addEventListener("mousemove", e => {
 
 canvas.addEventListener("click", e => {
   const hit = [...localCreatures.values()].find(c => !c.dead && hitTest(c, e.clientX, e.clientY));
-  if (hit) { showFiche(hit, e.clientX, e.clientY); }
+  if (hit) showFiche(hit, e.clientX, e.clientY);
   else { ficheEl.classList.add("hidden"); selectedId = null; }
 });
 
 // ============================================================
-// OVERLAY CONNEXION
+// OVERLAY
 // ============================================================
 function showOverlay(msg) {
   let el = document.getElementById("overlay");
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "overlay";
-    document.body.appendChild(el);
-  }
+  if (!el) { el = document.createElement("div"); el.id = "overlay"; document.body.appendChild(el); }
   el.textContent = msg;
   el.style.display = "flex";
 }
@@ -357,12 +373,9 @@ const ageEl = document.getElementById("ui-age");
 const countEl = document.getElementById("ui-count");
 
 function formatElapsed(birth) {
-  const ms = Date.now() - birth;
-  const s = Math.floor(ms / 1000);
-  const d = Math.floor(s / 86400);
-  const h = Math.floor((s % 86400) / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
+  const s = Math.floor((Date.now() - birth) / 1000);
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60), sec = s % 60;
   return `${d}j ${String(h).padStart(2,"0")}h ${String(m).padStart(2,"0")}m ${String(sec).padStart(2,"0")}s`;
 }
 
@@ -374,10 +387,17 @@ function updateUI() {
   ageEl.textContent = formatElapsed(worldBirth);
   const living = [...localCreatures.values()].filter(c => !c.dead).length;
   countEl.textContent = living === 0 ? "— monde éteint —" : `${living} créature${living > 1 ? "s" : ""}`;
+
+  // Compteur par espèce
+  const speciesEl = document.getElementById("ui-species");
+  if (speciesEl && Object.keys(speciesCounts).length > 0) {
+    const entries = Object.entries(speciesCounts).sort((a, b) => b[1] - a[1]);
+    speciesEl.textContent = entries.map(([sp, n]) => `${sp} ${n}`).join("  ·  ");
+  }
 }
 
 // ============================================================
-// BOUCLE DE RENDU
+// BOUCLE
 // ============================================================
 let lastUiUpdate = 0, lastFicheUpdate = 0;
 
@@ -387,10 +407,13 @@ function loop(timestamp) {
 
   renderTick++;
   updateLocalCreatures();
+
   localCreatures.forEach(c => {
     if (c.dead && (c.deathGlow ?? 0) <= 0) return;
     drawCreature(c, renderTick);
   });
+
+  updateAndDrawImplosions();
 
   if (timestamp - lastUiUpdate > 1000) { updateUI(); lastUiUpdate = timestamp; }
   if (timestamp - lastFicheUpdate > 150) { updateFiche(); lastFicheUpdate = timestamp; }
