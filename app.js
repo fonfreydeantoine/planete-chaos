@@ -8,7 +8,7 @@
 // DATE DE NAISSANCE DU MONDE
 // Mettre ici la date du premier déploiement (ne plus jamais changer)
 // ============================================================
-const WORLD_BIRTH = new Date("2025-01-01T00:00:00Z").getTime();
+const WORLD_BIRTH = new Date("2026-04-26T16:16:00Z").getTime();
 const WORLD_SEED = "planete-chaos-v1";
 
 // ============================================================
