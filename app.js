@@ -8,7 +8,7 @@
 // DATE DE NAISSANCE DU MONDE
 // Mettre ici la date du premier déploiement (ne plus jamais changer)
 // ============================================================
-const WORLD_BIRTH = new Date("2026-04-26T16:16:00Z").getTime();
+const WORLD_BIRTH = new Date("2026-04-26T14:16:00Z").getTime();
 const WORLD_SEED = "planete-chaos-v1";
 
 // ============================================================
@@ -378,7 +378,7 @@ function initWorld() {
   const W = canvas.width;
   const H = canvas.height;
 
-  const initCount = 25 + Math.floor(initRng() * 15);
+const initCount = 60 + Math.floor(initRng() * 20);
 
   for (let i = 0; i < initCount; i++) {
     const x = 60 + initRng() * (W - 120);
@@ -389,7 +389,7 @@ function initWorld() {
 
   // Replay accéléré : reconstituer l'état actuel
   const elapsed = Math.floor((Date.now() - WORLD_BIRTH) / 1000);
-  const replaySteps = Math.min(elapsed, 8000); // max 8000 ticks de replay
+const replaySteps = Math.min(elapsed, 3000);
 
   console.log(`Replay de ${replaySteps} ticks (${elapsed}s écoulées depuis la naissance)`);
 
